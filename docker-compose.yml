@@ -1,0 +1,37 @@
+version: '3'
+services:
+  influxdb:
+    image: influxdb:1.8.10
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=homeassistant
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=adminadmin
+      - INFLUXDB_USER=admin
+      - INFLUXDB_USER_PASSWORD=adminadmin
+    volumes:
+      - influxdb_data:/var/lib/influxdb
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=adminadmin
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SECURITY_COOKIE_SAMESITE=None
+      - GF_SECURITY_COOKIE_SECURE=false
+      - GF_SECURITY_ALLOW_ANONYMOUS_LOGIN=true
+    depends_on:
+      - influxdb
+
+  your_addon:
+    image: elitedesire/finalproject
+    restart: always
+    depends_on:
+      - influxdb
+      - grafana
+
+volumes:
+  influxdb_data:

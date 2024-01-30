@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1"/>
+<meta content="LCIlFlxOaCYfPDdRGiMAPywgZDMdEwEYnaGn4c_m-Tec_BdGzkTB0jNi" name="csrf-token">
+<title>SolarAutopilot</title>
+    <link rel="preload" href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600&display=swap" as="style" onload="this.onload=null;this.rel='stylesheet'"/>
+    <noscript>
+        <link href="https://fonts.googleapis.com/css2?family=Exo:wght@400;500;600&display=swap" rel="stylesheet" type="text/css"/>
+    </noscript>
+    <link phx-track-static rel="stylesheet" href="./css/style.css"/>
+    <link rel="stylesheet" href="./css/config.css">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon" />
+
+
+    <script defer phx-track-static type="text/javascript" src="/js/app-ed5fb725b2323e6c326d78d689c148ae.js?vsn=d"></script>
+    <script defer phx-track-static type="text/javascript" src="/js/vendor/echarts.min-c5ef426b883db4257694b21b88257a57.js?vsn=d"></script>
+</head>
+<body class="with-header">
+<div class="header">
+    <div class="container">
+        <div class="logo"><h1> <span style="color: red;">Solar</span> Autopilot</h1></div>
+        <div class="menu">
+<a href="#" class="menu-item" data-phx-link="redirect" data-phx-link-state="push">
+            <div class="item-img" style="background-image: url(/images/tabs/dashboard-fe6236ddd7c826e9f469babe7dee6705.svg?vsn=d);"></div>
+            <span class="item-caption">Dashboard</span>
+</a>
+            <a href="#charts" data-iframe="/grafana/d/sa-charts?kiosk=tv" class="menu-item">
+                <div class="item-img" style="background-image: url(/images/tabs/chart-34fb756a097dde6fe750a40b934affdc.svg?vsn=d);"></div>
+                <span class="item-caption">Charts</span>
+            </a>
+<a href="#" class="menu-item" data-phx-link="redirect" data-phx-link-state="push">
+            <div class="item-img" style="background-image: url(/images/tabs/totals-e8345009cbaf91c5842f3bb7500afb79.svg?vsn=d);"></div>
+            <span class="item-caption">Analytics</span>
+</a>
+<a href="#" class="menu-item" data-phx-link="redirect" data-phx-link-state="push">
+            <div class="item-img" style="background-image: url(/images/tabs/power-60ba709da78825327d4c97c37e46da40.svg?vsn=d);"></div>
+            <span class="item-caption">Messages</span>
+</a>
+<a href="#" class="menu-item" data-phx-link="redirect" data-phx-link-state="push">
+            <div class="item-img" style="background-image: url(/images/tabs/config-2b0dc6769e27cd4f705e08033cdec960.svg?vsn=d);"></div>
+            <span class="item-caption">Settings</span>
+</a>
+        </div>
+    </div>
+</div>
+<div class="form-container">
+    <div class="main">
+        <input type="checkbox" id="chk" arial-hidden="true">
+        <div class="signup">
+        <form action="/updateConfig" method="post">
+            <!-- <label for="mqttIp">MQTT IP:</label> -->
+            <label for="chk" arial-hidden="true">Configuration</label>
+            <input type="text" id="mqttIp" name="mqttIp"placeholder="Enter MQTT Ip Address" required>
+            <input type="text" id="username" name="username" placeholder="Enter Username" required>
+            <input type="password" id="password" name="password"placeholder="Enter Password"  required>
+            <div class="select">
+                <span for="inverterType">Inverter</span>
+                <select id="inverterType" name="inverterType" required>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                </select>
+                <span for="batteryType">Battery</span>
+                <select id="batteryType" name="batteryType" required>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                    <option value="6">6</option>
+                </select>
+            </div>
+            <br> 
+            <button type="submit">Save</button>
+        </form>
+        <div class="login"></div>
+    </div>
+</div>
+
+</body>
+</html>

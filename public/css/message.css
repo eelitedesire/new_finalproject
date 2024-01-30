@@ -1,0 +1,45 @@
+
+section {
+    padding: 20px;
+    background-color: #fff;
+    margin: 20px auto; /* Center the section horizontally */
+    border-radius: 5px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    max-width: 600px; /* Set a maximum width for better readability */
+}
+
+h2 {
+    color: #333;
+}
+
+label {
+    font-weight: bold;
+}
+
+select {
+    margin-bottom: 20px;
+    padding: 10px;
+    border-radius: 5px;
+}
+
+ul {
+    list-style-type: none;
+    padding: 0;
+}
+
+li {
+    margin-bottom: 10px;
+    background-color: #f9f9f9;
+    padding: 10px;
+    border-radius: 5px;
+    box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+}
+
+li:hover {
+    background-color: #e0e0e0;
+}
+
+progress {
+    width: 100%;
+    margin-bottom: 10px;
+}
