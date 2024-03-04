@@ -1,14 +1,32 @@
-name: "Carbonz SolarAutopilot"
-description: "Solar Assistant project and allows inverter changes over MQTT"
-version: "1.1.0"
-slug: "hello_world"
+name: Carbonoz Solarpilot
+version: 1.0.0
+slug: carbonoz_solarpilot
+description: CARBONOZ Solarpilot on Homeassistant runs in a Docker container and will be offered in the Homeassistant Addon store for download.
+url: https://github.com/eelitedesire/finalproject
+startup: services
+ingress: true
+ingress_port: 4000
 init: false
+panel_icon: mdi:rocket
+panel_title: Carbonz Solarpilot
 arch:
   - aarch64
   - amd64
-  - armhf
   - armv7
-  - i386
-startup: services
+map:
+  - data
+  - config
+options:
+  env_vars:
+    mqttIp: "192.168.160.55"
+    username: "Developer1"
+    password: "hDOwwfGTrgnhdu0d71N0"
+    inverterType: "1"
+    batteryType: "1"
+  config_path: "mqttConfig.json"
 ports:
-  2000/tcp: 2000
+  4000/tcp: 4000
+ports_description:
+  4000/tcp: "Web server for Carbonz Solarpilot"
+schema:
+  log_level: list(trace|debug|info|notice|warning|error|fatal)?
