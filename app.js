@@ -5,16 +5,19 @@ const fs = require('fs');
 const path = require('path');
 const Influx = require('influx');
 const moment = require('moment');
+const ejs = require('ejs');
+const fetch = require('node-fetch');
 
 const app = express();
 const port = 2000;
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
+app.set('view engine', 'ejs');
 
 // InfluxDB configuration
 const influxConfig = {
-    host: '172.17.0.1', // Replace with the actual IP address of your InfluxDB container
+    host: 'localhost',
     port: 8086,
     database: 'homeassistant',
     username: 'admin',
@@ -30,6 +33,10 @@ let mqttClient = connectToMqtt();
 // Array to store incoming messages
 let incomingMessages = [];
 
+// Home Assistant configuration
+const homeAssistantUrl = 'http://192.168.160.55:8123/api/states';
+const homeAssistantToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI3OGY4ODY2ZWU1MDg0N2FiYmNlMzk5MGUxNjgzNzdiZSIsImlhdCI6MTcwOTA1MjAzMywiZXhwIjoyMDI0NDEyMDMzfQ.6YDJLIGS7YtPLbdtSClcUf_CFAm9U3VFkpKBJXMJkwM';
+
 // Express routes
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/index.html');
@@ -38,6 +45,10 @@ app.get('/', (req, res) => {
 app.get('/settings', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'settings.html'));
 });
+app.get('/charts', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'charts.html'));
+});
+
 
 app.post('/updateConfig', (req, res) => {
     mqttConfig = {
@@ -76,31 +87,29 @@ app.get('/api/messages', (req, res) => {
 
 app.get('/analytics', async (req, res) => {
     try {
-        const startDate = moment().subtract(3, 'minutes').toISOString();
-        const endDate = moment().toISOString();
+        const loadPowerData = await queryInfluxDB('solar_assistant_DEYE/total/load_power/state');
+        const pvPowerData = await queryInfluxDB('solar_assistant_DEYE/total/pv_power/state');
+        const batteryStateOfChargeData = await queryInfluxDB('solar_assistant_DEYE/total/battery_state_of_charge/state');
+        const batteryPowerData = await queryInfluxDB('solar_assistant_DEYE/total/battery_power/state');
+        const gridPowerData = await queryInfluxDB('solar_assistant_DEYE/total/grid_power/state');
 
-        let analyticsData = await calculateAnalytics(startDate, endDate);
+        const data = {
+            loadPowerData,
+            pvPowerData,
+            batteryStateOfChargeData,
+            batteryPowerData,
+            gridPowerData,
+        };
 
-        // If no data for the last 30 days, fetch and append current data
-        if (analyticsData.every(item => item.dailyTotal.length === 0)) {
-            const currentData = await calculateAnalytics(null, null);
-            analyticsData = currentData;
-        }
-
-        res.render('analytics', { analyticsData });
+        res.render('analytics', { data });
     } catch (error) {
-        console.error('Error in /analytics route:', error.message);
-        res.status(500).send('Internal Server Error: ' + error.message);
+        console.error('Error fetching data from InfluxDB:', error);
+        res.status(500).send('Error fetching data from InfluxDB');
     }
 });
 
-
-// Define the EJS view engine settings
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
-
-app.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+app.listen(port, '0.0.0.0', () => {
+    console.log(`Server is running on http://0.0.0.0:${port}`);
 });
 
 function filterMessagesByCategory(category) {
@@ -158,6 +167,7 @@ function connectToMqtt() {
         console.log(`Received message: ${formattedMessage}`);
         incomingMessages.push(formattedMessage);
         saveMessageToInfluxDB(topic, message);
+        sendDataToHomeAssistant(topic, message);
     });
 
     client.on('error', (err) => {
@@ -166,59 +176,6 @@ function connectToMqtt() {
     });
 
     return client;
-}
-
-async function calculateAnalytics(startDate, endDate) {
-    const topics = ['load_power', 'pv_power', 'battery_power', 'grid_power'];
-    const analyticsData = [];
-
-    const fetchPromises = topics.map(async (topic) => {
-        try {
-            let query = '';
-
-            if (startDate && endDate) {
-                query = `
-                    SELECT SUM("value") AS total_kwh
-                    FROM "state"
-                    WHERE "topic" =~ /${topic}/ AND time >= '${startDate}' AND time <= '${endDate}'
-                    GROUP BY time(1d)
-                    FILL(null)
-                `;
-            } else {
-                // Fetch current data
-                query = `
-                    SELECT "value" AS total_kwh
-                    FROM "state"
-                    WHERE "topic" =~ /${topic}/
-                    ORDER BY time DESC
-                    LIMIT 1
-                `;
-            }
-
-            const result = await influx.query(query);
-
-            const dailyTotal = result.map(row => ({
-                date: moment(row.time).format('YYYY-MM-DD'),
-                total_kwh: row.total_kwh || 0,
-            }));
-
-            analyticsData.push({
-                topic,
-                dailyTotal,
-            });
-        } catch (error) {
-            console.error(`Error calculating analytics for ${topic}:`, error.message);
-        }
-    });
-
-    try {
-        await Promise.all(fetchPromises);
-    } catch (error) {
-        console.error('Error fetching analytics data:', error.message);
-        throw error;
-    }
-
-    return analyticsData;
 }
 
 function saveMessageToInfluxDB(topic, message) {
@@ -249,3 +206,58 @@ function saveMessageToInfluxDB(topic, message) {
         console.error('Error parsing message:', error.message);
     }
 }
+
+async function queryInfluxDB(topic) {
+    const query = `
+    SELECT mean("value") AS "value"
+    FROM "state"
+    WHERE "topic" = '${topic}'
+    AND time >= now() - 30d
+    GROUP BY time(1d)
+    `;
+
+    try {
+        const result = await influx.query(query);
+        return result;
+    } catch (error) {
+        console.error(`Error querying InfluxDB for topic ${topic}:`, error);
+        return [];
+    }
+}
+
+async function sendDataToHomeAssistant(topic, message) {
+    const state = message.toString();
+    const data = {
+        state,
+        attributes: {
+            friendly_name: `Solar Assistant ${topic}`,
+            unit_of_measurement: 'value',
+        }
+    };
+
+    try {
+        const response = await fetch(homeAssistantUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${homeAssistantToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+            console.log(`Data sent to Home Assistant successfully for topic ${topic}`);
+        } else if (response.status === 405) {
+            console.error(`Method not allowed for topic ${topic}. Please check your Home Assistant configuration.`);
+          
+        } else {
+            console.error(`Failed to send data to Home Assistant for topic ${topic}:`, response.status);
+           
+        }
+    } catch (error) {
+        console.error(`Error sending data to Home Assistant for topic ${topic}:`, error);
+      
+    }
+}
+
+
