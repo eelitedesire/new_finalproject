@@ -4,20 +4,27 @@ const mqtt = require('mqtt');
 const fs = require('fs');
 const path = require('path');
 const Influx = require('influx');
-const moment = require('moment');
 const ejs = require('ejs');
-const fetch = require('node-fetch');
 
 const app = express();
-const port = 2000;
+const port = 8000;
 
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static('public'));
 app.set('view engine', 'ejs');
 
-// InfluxDB configuration
+const configPath = '/data/options.json';
+let config;
+
+try {
+    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+} catch (error) {
+    console.error('Error reading configuration file:', error);
+    process.exit(1);
+}
+
 const influxConfig = {
-    host: 'localhost',
+    host: '192.168.160.55',
     port: 8086,
     database: 'homeassistant',
     username: 'admin',
@@ -25,59 +32,41 @@ const influxConfig = {
 };
 
 const influx = new Influx.InfluxDB(influxConfig);
+const inverter_number = config.inverter_number;
+const battery_number = config.battery_number;
+const mqttConfig = {
+    host: config.mqtt_ip,
+    port: config.mqtt_port,
+    username: config.mqtt_username,
+    password: config.mqtt_password,
+};
 
-// MQTT configuration
-let mqttConfig = loadMqttConfig();
-let mqttClient = connectToMqtt();
+let mqttClient;
 
-// Array to store incoming messages
 let incomingMessages = [];
 
-// Home Assistant configuration
-const homeAssistantUrl = 'http://192.168.160.55:8123/api/states';
-const homeAssistantToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI3OGY4ODY2ZWU1MDg0N2FiYmNlMzk5MGUxNjgzNzdiZSIsImlhdCI6MTcwOTA1MjAzMywiZXhwIjoyMDI0NDEyMDMzfQ.6YDJLIGS7YtPLbdtSClcUf_CFAm9U3VFkpKBJXMJkwM';
-
 // Express routes
-app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/public/index.html');
-});
 
 app.get('/settings', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'settings.html'));
 });
+
 app.get('/charts', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'charts.html'));
 });
 
-
-app.post('/updateConfig', (req, res) => {
-    mqttConfig = {
-        mqttIp: req.body.mqttIp,
-        username: req.body.username,
-        password: req.body.password,
-        inverterType: req.body.inverterType,
-        batteryType: req.body.batteryType,
-    };
-
-    saveMqttConfig(mqttConfig);
-
-    mqttClient.end();
-    mqttClient = connectToMqtt();
-
-    res.redirect('/status');
-});
-
 app.get('/status', (req, res) => {
-    if (mqttClient) {
-        res.sendFile(__dirname + '/public/success.html');
+    if (mqttClient && mqttClient.connected) {
+        res.sendFile(path.join(__dirname, 'public', 'success.html'));
     } else {
-        res.sendFile(__dirname + '/public/contact.html');
+        res.sendFile(path.join(__dirname, 'public', 'contact.html'));
     }
 });
 
 app.get('/messages', (req, res) => {
-    res.sendFile(__dirname + '/public/messages.html');
+    res.sendFile(path.join(__dirname, 'public', 'messages.html'));
 });
+
 
 app.get('/api/messages', (req, res) => {
     const categoryFilter = req.query.category;
@@ -92,6 +81,19 @@ app.get('/analytics', async (req, res) => {
         const batteryStateOfChargeData = await queryInfluxDB('solar_assistant_DEYE/total/battery_state_of_charge/state');
         const batteryPowerData = await queryInfluxDB('solar_assistant_DEYE/total/battery_power/state');
         const gridPowerData = await queryInfluxDB('solar_assistant_DEYE/total/grid_power/state');
+        const gridVoltageData = await queryInfluxDB('solar_assistant_DEYE/total/grid_voltage/state');
+
+        const monthlyLoadPowerData = await getMonthlyData('solar_assistant_DEYE/total/load_power/state');
+        const monthlyPvPowerData = await getMonthlyData('solar_assistant_DEYE/total/pv_power/state');
+        const monthlyBatteryStateOfChargeData = await getMonthlyData('solar_assistant_DEYE/total/battery_state_of_charge/state');
+        const monthlyBatteryPowerData = await getMonthlyData('solar_assistant_DEYE/total/battery_power/state');
+        const monthlyGridPowerData = await getMonthlyData('solar_assistant_DEYE/total/grid_power/state');
+
+        const solarPvTotalDaily = await calculateTotalEnergy('solar_assistant_DEYE/total/pv_power/state', 'daily');
+        const solarPvTotalWeekly = await calculateTotalEnergy('solar_assistant_DEYE/total/pv_power/state', 'weekly');
+        const solarPvTotalMonthly = await calculateTotalEnergy('solar_assistant_DEYE/total/pv_power/state', 'monthly');
+
+        const gridVoltage = await getCurrentValue('solar_assistant_DEYE/total/grid_voltage/state');
 
         const data = {
             loadPowerData,
@@ -99,6 +101,16 @@ app.get('/analytics', async (req, res) => {
             batteryStateOfChargeData,
             batteryPowerData,
             gridPowerData,
+            gridVoltageData,
+            monthlyLoadPowerData,
+            monthlyPvPowerData,
+            monthlyBatteryStateOfChargeData,
+            monthlyBatteryPowerData,
+            monthlyGridPowerData,
+            solarPvTotalDaily,
+            solarPvTotalWeekly,
+            solarPvTotalMonthly,
+            gridVoltage,
         };
 
         res.render('analytics', { data });
@@ -108,8 +120,65 @@ app.get('/analytics', async (req, res) => {
     }
 });
 
+app.get('/', async (req, res) => {
+    try {
+        const loadPowerData = await queryInfluxDB('solar_assistant_DEYE/total/load_power/state');
+        const solarProductionData = await queryInfluxDB('solar_assistant_DEYE/total/pv_power/state');
+        const energyStorageData = await queryInfluxDB('solar_assistant_DEYE/total/battery_power/state');
+        const gridImportData = await queryInfluxDB('solar_assistant_DEYE/total/grid_power/state');
+        const gridVoltagedata = await queryInfluxDB('solar_assistant_DEYE/total/grid_voltage/state');
+        // Calculate the current values for the circle progress bars
+        const loadPower = await getCurrentValue('solar_assistant_DEYE/total/load_power/state');
+        const solarProduction = await getCurrentValue('solar_assistant_DEYE/total/pv_power/state');
+        const batteryStateOfCharge = await getCurrentValue('solar_assistant_DEYE/total/battery_state_of_charge/state');
+        const gridImport = await getCurrentValue('solar_assistant_DEYE/total/grid_power/state');
+        const gridVoltage = await getCurrentValue('solar_assistant_DEYE/total/grid_voltage/state');
+        const data = {
+            loadPowerData,
+            solarProductionData,
+            energyStorageData,
+            gridImportData,
+            gridVoltagedata,
+            loadPower,
+            solarProduction,
+            batteryStateOfCharge,
+            gridImport,
+            gridVoltage,
+        };
+
+        res.render('energy-dashboard', { data });
+    } catch (error) {
+        console.error('Error fetching data from InfluxDB:', error);
+        res.status(500).send('Error fetching data from InfluxDB');
+    }
+});
+
+app.get('/api/realtime-data', async (req, res) => {
+    try {
+        const loadPower = await getCurrentValue('solar_assistant_DEYE/total/load_power/state');
+        const solarProduction = await getCurrentValue('solar_assistant_DEYE/total/pv_power/state');
+        const batteryStateOfCharge = await getCurrentValue('solar_assistant_DEYE/total/battery_state_of_charge/state');
+        const gridImport = await getCurrentValue('solar_assistant_DEYE/total/grid_power/state');
+        const gridVoltage = await getCurrentValue('solar_assistant_DEYE/total/grid_voltage/state');
+
+        const data = {
+            loadPower,
+            solarProduction,
+            batteryStateOfCharge,
+            gridImport,
+            gridVoltage,
+        };
+
+        res.json(data);
+    } catch (error) {
+        console.error('Error fetching real-time data:', error);
+        res.status(500).send('Error fetching real-time data');
+    }
+});
+
 app.listen(port, '0.0.0.0', () => {
     console.log(`Server is running on http://0.0.0.0:${port}`);
+    connectToMqtt();
 });
 
 function filterMessagesByCategory(category) {
@@ -137,45 +206,28 @@ function getCategoryKeywords(category) {
     }
 }
 
-function loadMqttConfig() {
-    try {
-        const configData = fs.readFileSync('mqttConfig.json');
-        return JSON.parse(configData);
-    } catch (error) {
-        return {};
-    }
-}
-
-function saveMqttConfig(config) {
-    fs.writeFileSync('mqttConfig.json', JSON.stringify(config, null, 2));
-}
-
 function connectToMqtt() {
-    const { mqttIp, username, password } = mqttConfig;
-    const client = mqtt.connect(`mqtt://${mqttIp}`, {
-        username,
-        password,
+    mqttClient = mqtt.connect(`mqtt://${mqttConfig.host}:${mqttConfig.port}`, {
+        username: mqttConfig.username,
+        password: mqttConfig.password,
     });
 
-    client.on('connect', () => {
+    mqttClient.on('connect', () => {
         console.log('Connected to MQTT broker');
-        client.subscribe('solar_assistant_DEYE/#');
+        mqttClient.subscribe('solar_assistant_DEYE/#');
     });
 
-    client.on('message', (topic, message) => {
+    mqttClient.on('message', (topic, message) => {
         const formattedMessage = `${topic}: ${message.toString()}`;
         console.log(`Received message: ${formattedMessage}`);
         incomingMessages.push(formattedMessage);
         saveMessageToInfluxDB(topic, message);
-        sendDataToHomeAssistant(topic, message);
     });
 
-    client.on('error', (err) => {
+    mqttClient.on('error', (err) => {
         console.error('Error connecting to MQTT broker:', err.message);
         mqttClient = null;
     });
-
-    return client;
 }
 
 function saveMessageToInfluxDB(topic, message) {
@@ -209,11 +261,12 @@ function saveMessageToInfluxDB(topic, message) {
 
 async function queryInfluxDB(topic) {
     const query = `
-    SELECT mean("value") AS "value"
-    FROM "state"
-    WHERE "topic" = '${topic}'
-    AND time >= now() - 30d
-    GROUP BY time(1d)
+     SELECT mean("value") * 2.38 AS "value"
+FROM "state"
+WHERE "topic" = '${topic}'
+  AND time >= now() - 30d - 14h
+GROUP BY time(1d)
+
     `;
 
     try {
@@ -221,43 +274,75 @@ async function queryInfluxDB(topic) {
         return result;
     } catch (error) {
         console.error(`Error querying InfluxDB for topic ${topic}:`, error);
-        return [];
+        throw error;
     }
 }
 
-async function sendDataToHomeAssistant(topic, message) {
-    const state = message.toString();
-    const data = {
-        state,
-        attributes: {
-            friendly_name: `Solar Assistant ${topic}`,
-            unit_of_measurement: 'value',
-        }
-    };
+async function getMonthlyData(topic) {
+    const query = `
+    SELECT mean("value") AS "value"
+    FROM "state"
+    WHERE "topic" = '${topic}'
+    AND time >= now() - 365d
+    GROUP BY time(30d)
+    `;
 
     try {
-        const response = await fetch(homeAssistantUrl, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${homeAssistantToken}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        });
-
-        if (response.ok) {
-            console.log(`Data sent to Home Assistant successfully for topic ${topic}`);
-        } else if (response.status === 405) {
-            console.error(`Method not allowed for topic ${topic}. Please check your Home Assistant configuration.`);
-          
-        } else {
-            console.error(`Failed to send data to Home Assistant for topic ${topic}:`, response.status);
-           
-        }
+        const result = await influx.query(query);
+        const monthlyValues = result.map(point => point.value);
+        return monthlyValues;
     } catch (error) {
-        console.error(`Error sending data to Home Assistant for topic ${topic}:`, error);
-      
+        console.error(`Error querying InfluxDB for topic ${topic}:`, error);
+        throw error;
     }
 }
 
+async function getCurrentValue(topic) {
+    const query = `
+        SELECT last("value") AS "value"
+        FROM "state"
+        WHERE "topic" = '${topic}'
+        ORDER BY time DESC
+        LIMIT 1
+    `;
 
+    try {
+        const result = await influx.query(query);
+        return result[0];
+    } catch (error) {
+        console.error(`Error querying InfluxDB for topic ${topic}:`, error);
+        throw error;
+    }
+}
+
+async function calculateTotalEnergy(topic, period) {
+    let timeRange;
+    switch (period) {
+        case 'daily':
+            timeRange = '1d';
+            break;
+        case 'weekly':
+            timeRange = '7d';
+            break;
+        case 'monthly':
+            timeRange = '30d';
+            break;
+        default:
+            throw new Error('Invalid period');
+    }
+
+    const query = `
+        SELECT mean("value") AS "total"
+        FROM "state"
+        WHERE "topic" = '${topic}'
+        AND time >= now() - ${timeRange}
+    `;
+
+    try {
+        const result = await influx.query(query);
+        return result[0].total;
+    } catch (error) {
+        console.error(`Error querying InfluxDB for topic ${topic}:`, error);
+        throw error;
+    }
+}
